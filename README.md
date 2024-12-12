@@ -12,6 +12,8 @@ Install the required packages using `requirements_opt.txt` (torchvision, pandas,
 
 Install SageAttention according to [this](https://www.reddit.com/r/StableDiffusion/comments/1h7hunp/how_to_run_hunyuanvideo_on_a_single_24gb_vram_card/?rdt=36679). (You may need to update the Microsoft Visual C++ redistributable package.)
 
+I cannot answer questions about environment setup.
+
 ## Download the Model
 
 Download the model according to the official README and place it in any directory as follows:
@@ -37,6 +39,8 @@ python generate_video_optimized.py --model-base /path/to/ckpts --fp8
 --blocks-to-swap 20 --img-in-txt-in-offloading
 ```
 
+For 24GB VRAM, with `--block-to-swap 38` specified, 1280x720 seems to be the limit at 109 frames.
+
 Specify the directory of the downloaded model with `--model-base` (by keeping the directory structure above, you don't need to specify `--dit-weight`).
 
 Specify `--fp8` to reduce the memory usage by converting the DiT weights to float8_e4m3fn.
@@ -54,8 +58,6 @@ If your VRAM is less than 24GB, you can use the `--vae-chunk-size` option to red
 `--latent-path` option is also available to decode saved latents only.
 
 Other options are the same as `sample_video.py`.
-
-For 24GB VRAM, with `--block-to-swap 38` specified, 1280x720 seems to be the limit at 109 frames.
 
 The original README is below.
 
@@ -100,6 +102,8 @@ python generate_video_optimized.py --model-base /path/to/ckpts --fp8
 --blocks-to-swap 20 --img-in-txt-in-offloading
 ```
 
+24GB VRAMの場合、`--block-to-swap 38`指定時、1280x720では109フレームが限界のようです。
+
 `--model-base`にはダウンロードしたモデルのディレクトリを指定します（上のディレクトリ構成にしておくことで`--dit-weight`の指定は不要）。
 
 `--fp8`を指定するとDiTの重みをfloat8_e4m3fnにして省メモリ化します。
@@ -117,8 +121,6 @@ VRAMが24GBより少ない場合、`--vae-chunk-size 16`のように`--vae-chunk
 保存したlatentのデコードのみを行う`--latent-path`オプションもあります。
 
 他のオプションは`sample_video.py`と同じです。
-
-24GB VRAMの場合、`--block-to-swap 38`指定時、1280x720では109フレームが限界のようです。
 
 以下はオリジナルのREADMEです。
 
