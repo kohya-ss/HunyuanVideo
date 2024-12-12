@@ -16,6 +16,7 @@ from .posemb_layers import apply_rotary_emb
 from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
+from .custom_offloading_utils_forward_only import ModelOffloader, synchronize_device, clean_memory_on_device
 
 
 class MMDoubleStreamBlock(nn.Module):
@@ -36,9 +37,11 @@ class MMDoubleStreamBlock(nn.Module):
         qkv_bias: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        attn_mode: str = "flash",
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
+        self.attn_mode = attn_mode
 
         self.deterministic = False
         self.heads_num = heads_num
@@ -205,6 +208,7 @@ class MMDoubleStreamBlock(nn.Module):
                 q,
                 k,
                 v,
+                mode=self.attn_mode, 
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_kv=cu_seqlens_kv,
                 max_seqlen_q=max_seqlen_q,
@@ -271,9 +275,11 @@ class MMSingleStreamBlock(nn.Module):
         qk_scale: float = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        attn_mode: str = "flash",
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
+        self.attn_mode = attn_mode
 
         self.deterministic = False
         self.hidden_size = hidden_size
@@ -369,6 +375,7 @@ class MMSingleStreamBlock(nn.Module):
                 q,
                 k,
                 v,
+                mode=self.attn_mode, 
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_kv=cu_seqlens_kv,
                 max_seqlen_q=max_seqlen_q,
@@ -443,6 +450,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         The dtype of the model.
     device: torch.device
         The device of the model.
+    attn_mode: str
+        The mode of the attention, default is flash.
     """
 
     @register_to_config
@@ -467,6 +476,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         use_attention_mask: bool = True,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        attn_mode: str = "flash",
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -550,6 +560,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     qk_norm=qk_norm,
                     qk_norm_type=qk_norm_type,
                     qkv_bias=qkv_bias,
+                    attn_mode=attn_mode,
                     **factory_kwargs,
                 )
                 for _ in range(mm_double_blocks_depth)
@@ -566,6 +577,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     mlp_act_type=mlp_act_type,
                     qk_norm=qk_norm,
                     qk_norm_type=qk_norm_type,
+                    attn_mode=attn_mode,
                     **factory_kwargs,
                 )
                 for _ in range(mm_single_blocks_depth)
@@ -579,6 +591,56 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             get_activation_layer("silu"),
             **factory_kwargs,
         )
+
+        self.blocks_to_swap = None
+        self.offloader_double = None
+        self.offloader_single = None
+        self._enable_img_in_txt_in_offloading = False
+
+    def enable_img_in_txt_in_offloading(self):
+        self._enable_img_in_txt_in_offloading = True
+
+    def enable_block_swap(self, num_blocks: int, device: torch.device):
+        self.blocks_to_swap = num_blocks
+        self.num_double_blocks = len(self.double_blocks)
+        self.num_single_blocks = len(self.single_blocks)
+        double_blocks_to_swap = num_blocks // 2
+        single_blocks_to_swap = (num_blocks - double_blocks_to_swap) * 2 + 1
+
+        assert double_blocks_to_swap <= self.num_double_blocks - 1 and single_blocks_to_swap <= self.num_single_blocks - 1, (
+            f"Cannot swap more than {self.num_double_blocks - 1} double blocks and {self.num_single_blocks - 1} single blocks. "
+            f"Requested {double_blocks_to_swap} double blocks and {single_blocks_to_swap} single blocks."
+        )
+
+        self.offloader_double = ModelOffloader(
+            "double", self.double_blocks, self.num_double_blocks, double_blocks_to_swap, device # , debug=True
+        )
+        self.offloader_single = ModelOffloader(
+            "single", self.single_blocks, self.num_single_blocks, single_blocks_to_swap, device # , debug=True
+        )
+        print(
+            f"HYVideoDiffusionTransformer: Block swap enabled. Swapping {num_blocks} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
+        )
+
+    def move_to_device_except_swap_blocks(self, device: torch.device):
+        # assume model is on cpu. do not move blocks to device to reduce temporary memory usage
+        if self.blocks_to_swap:
+            save_double_blocks = self.double_blocks
+            save_single_blocks = self.single_blocks
+            self.double_blocks = None
+            self.single_blocks = None
+
+        self.to(device)
+
+        if self.blocks_to_swap:
+            self.double_blocks = save_double_blocks
+            self.single_blocks = save_single_blocks
+
+    def prepare_block_swap_before_forward(self):
+        if self.blocks_to_swap is None or self.blocks_to_swap == 0:
+            return
+        self.offloader_double.prepare_block_devices_before_forward(self.double_blocks)
+        self.offloader_single.prepare_block_devices_before_forward(self.single_blocks)
 
     def enable_deterministic(self):
         for block in self.double_blocks:
@@ -631,6 +693,11 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             vec = vec + self.guidance_in(guidance)
 
         # Embed image and text.
+        if self._enable_img_in_txt_in_offloading:
+            self.img_in.to(x.device, non_blocking=True)
+            self.txt_in.to(x.device, non_blocking=True)
+            synchronize_device(x.device)
+
         img = self.img_in(img)
         if self.text_projection == "linear":
             txt = self.txt_in(txt)
@@ -640,6 +707,12 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             raise NotImplementedError(
                 f"Unsupported text_projection: {self.text_projection}"
             )
+        
+        if self._enable_img_in_txt_in_offloading:
+            self.img_in.to(torch.device("cpu"), non_blocking=True)
+            self.txt_in.to(torch.device("cpu"), non_blocking=True)
+            synchronize_device(x.device)
+            clean_memory_on_device(x.device)
 
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
@@ -652,7 +725,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
-        for _, block in enumerate(self.double_blocks):
+        for block_idx, block in enumerate(self.double_blocks):
             double_block_args = [
                 img,
                 txt,
@@ -664,12 +737,23 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 freqs_cis,
             ]
 
+            if self.blocks_to_swap:
+                self.offloader_double.wait_for_block(block_idx)
+
             img, txt = block(*double_block_args)
+
+            if self.blocks_to_swap:
+                self.offloader_double.submit_move_blocks(self.double_blocks, block_idx)
 
         # Merge txt and img to pass through single stream blocks.
         x = torch.cat((img, txt), 1)
+        if self.blocks_to_swap:
+            # delete img, txt to reduce memory usage
+            del img, txt
+            clean_memory_on_device(x.device)
+
         if len(self.single_blocks) > 0:
-            for _, block in enumerate(self.single_blocks):
+            for block_idx, block in enumerate(self.single_blocks):
                 single_block_args = [
                     x,
                     vec,
@@ -680,8 +764,13 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     max_seqlen_kv,
                     (freqs_cos, freqs_sin),
                 ]
+                if self.blocks_to_swap:
+                    self.offloader_single.wait_for_block(block_idx)
 
                 x = block(*single_block_args)
+
+                if self.blocks_to_swap:
+                    self.offloader_single.submit_move_blocks(self.single_blocks, block_idx)
 
         img = x[:, :img_seq_len, ...]
 

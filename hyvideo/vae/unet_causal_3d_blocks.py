@@ -59,6 +59,7 @@ class CausalConv3d(nn.Module):
         stride: Union[int, Tuple[int, int, int]] = 1,
         dilation: Union[int, Tuple[int, int, int]] = 1,
         pad_mode='replicate',
+        chunk_size=0,
         **kwargs
     ):
         super().__init__()
@@ -66,12 +67,71 @@ class CausalConv3d(nn.Module):
         self.pad_mode = pad_mode
         padding = (kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size - 1, 0)  # W, H, T
         self.time_causal_padding = padding
+        self.chunk_size = chunk_size
 
         self.conv = nn.Conv3d(chan_in, chan_out, kernel_size, stride=stride, dilation=dilation, **kwargs)
 
-    def forward(self, x):
+    def original_forward(self, x):
         x = F.pad(x, self.time_causal_padding, mode=self.pad_mode)
         return self.conv(x)
+
+    def forward(self, x):
+        if self.chunk_size == 0:
+            return self.original_forward(x)
+
+        assert self.conv.stride[0] == 1 and self.conv.dilation[0] == 1, "Stride and dilation must be 1 for causal convolutions"
+
+        # if not large, call original forward
+        if x.shape[4] < self.chunk_size * 1.5:
+            return self.original_forward(x)
+
+        x = F.pad(x, self.time_causal_padding, mode=self.pad_mode)
+
+        B, C, D, H, W = x.shape
+        chunk_size = self.chunk_size
+        # print(f"chunked forward: {x.shape}, chunk_size: {chunk_size}")
+        indices = []
+        for i in range(0, W, chunk_size):
+            end_idx = min(i + chunk_size, W)
+            if W - end_idx < chunk_size // 2:
+                end_idx = W
+            indices.append((i, end_idx))
+            if end_idx == W:
+                break
+        # print(f"chunked forward: {x.shape}, chunked indices: {indices}")
+
+        chunks = []
+
+        # get the kernel size
+        kernel_size = self.conv.kernel_size[0]  # assume cubic kernel
+        assert kernel_size == self.conv.kernel_size[1] == self.conv.kernel_size[2], "Only cubic kernels are supported"
+
+        if kernel_size == 1:
+            # if kernel_size=1, no padding is needed
+            padding_size = 0
+            for start_idx, end_idx in indices:
+                chunk = x[:, :, :, :, start_idx:end_idx]
+                chunk_output = self.conv(chunk)
+                chunks.append(chunk_output)
+        else:
+            # if kernel_size=3, consider padding/overlapping
+            padding_size = kernel_size // 2  # 1 for kernel_size=3
+            for start_idx, end_idx in indices:
+                # split the chunk with padding
+                start_idx = max(0, start_idx - padding_size)
+                end_idx = min(W, end_idx + padding_size)
+                chunk = x[:, :, :, :, start_idx:end_idx]
+
+                # apply convolution
+                chunk_output = self.conv(chunk)
+                chunks.append(chunk_output)
+
+        # concatenate the chunks
+        x = torch.cat(chunks, dim=4)
+        assert x.shape[2] == D - padding_size * 2, f"Invalid shape: {x.shape}"
+        assert x.shape[3] == H - padding_size * 2, f"Invalid shape: {x.shape}"
+        assert x.shape[4] == W - padding_size * 2, f"Invalid shape: {x.shape}"
+        return x
 
 
 class UpsampleCausal3D(nn.Module):

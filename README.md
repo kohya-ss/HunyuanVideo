@@ -1,3 +1,129 @@
+追加のREADMEの[日本語版は下にあります。](#このリポジトリについて)
+
+## About
+
+This code is for video generation on GPUs with less than 24GB of VRAM using Block Swap.
+
+## Environment Setup
+
+Create a new venv and install the latest PyTorch and TorchVision (verified to work with 2.5.1).
+
+Install the required packages using `requirements_opt.txt` (torchvision, pandas, gradio, etc. are commented out).
+
+Install SageAttention according to [this](https://www.reddit.com/r/StableDiffusion/comments/1h7hunp/how_to_run_hunyuanvideo_on_a_single_24gb_vram_card/?rdt=36679). (You may need to update the Microsoft Visual C++ redistributable package.)
+
+## Download the Model
+
+Download the model according to the official README and place it in any directory as follows:
+
+```shell
+  ckpts
+    ├──hunyuan-video-t2v-720p
+    │  ├──transformers
+    │  ├──vae
+    ├──text_encoder
+    ├──text_encoder_2
+    ├──...
+```
+
+## Inference
+
+The following is an example of generating a 960x544, 129-frame video on a 24GB VRAM GPU.
+
+```shell
+python generate_video_optimized.py --model-base /path/to/ckpts --fp8 
+--video-size 544 960 --video-length 129 --infer-steps 30  --prompt "A cat walks on the grass, realistic style." 
+--flow-reverse --save-path path/to/results --attn-mode sageattn --output-type video 
+--blocks-to-swap 20 --img-in-txt-in-offloading
+```
+
+Specify the directory of the downloaded model with `--model-base` (by keeping the directory structure above, you don't need to specify `--dit-weight`).
+
+Specify `--fp8` to reduce the memory usage by converting the DiT weights to float8_e4m3fn.
+
+Specify the attention implementation to use with `--attn-mode`. You can specify `sageattn` or `flash` (Flash Attention 2 is required).
+
+Specify the output type with `--output-type`. You can specify `video`, `latent`, or `both`.
+
+`--blocks-to-swap` specifies the number of blocks to offload to the CPU (Block Swap). The maximum is 38. Do not specify `--use-cpu-offload`.
+
+Specify `--img-in-txt-in-offloading` to offload `img_in` and `txt_in` to the CPU.
+
+If your VRAM is less than 24GB, you can use the `--vae-chunk-size` option to reduce the memory usage of the VAE, like `--vae-chunk-size 16`. Consider using the existing `--vae-tiling` option.
+
+`--latent-path` option is also available to decode saved latents only.
+
+Other options are the same as `sample_video.py`.
+
+For 24GB VRAM, with `--block-to-swap 38` specified, 1280x720 seems to be the limit at 109 frames.
+
+The original README is below.
+
+----
+
+## このリポジトリについて
+
+Block Swapを使用して、24GB以下のVRAMのGPUで動画生成を行うためのコードです。
+
+## 環境整備
+
+新しくvenvを作成します。最新のPyTorchとTorchVisionをインストールします（2.5.1で動作確認済み）。
+
+`requirements_opt.txt`を使用して、必要なパッケージをインストールします（torchvisionとpandas、gradio等をコメントアウトしています）。
+
+[こちら](https://www.reddit.com/r/StableDiffusion/comments/1h7hunp/how_to_run_hunyuanvideo_on_a_single_24gb_vram_card/?rdt=36679)を参考にSageAttentionをインストールします。（Microsoft Visual C++ 再頒布可能パッケージを最新にする必要があるかもしれません。）
+
+※環境整備に関する質問にはお答えできません。
+
+## モデルのダウンロード
+
+公式のREADMEを参考にダウンロードし、任意のディレクトリに以下のように配置します。
+
+```shell
+  ckpts
+    ├──hunyuan-video-t2v-720p
+    │  ├──transformers
+    │  ├──vae
+    ├──text_encoder
+    ├──text_encoder_2
+    ├──...
+```
+
+## 推論の実施
+
+以下は24GB VRAMのGPUで960x544、129フレームの動画を生成する場合の例です。
+
+```shell
+python generate_video_optimized.py --model-base /path/to/ckpts --fp8 
+--video-size 544 960 --video-length 129 --infer-steps 30  --prompt "A cat walks on the grass, realistic style." 
+--flow-reverse --save-path path/to/results --attn-mode sageattn --output-type video 
+--blocks-to-swap 20 --img-in-txt-in-offloading
+```
+
+`--model-base`にはダウンロードしたモデルのディレクトリを指定します（上のディレクトリ構成にしておくことで`--dit-weight`の指定は不要）。
+
+`--fp8`を指定するとDiTの重みをfloat8_e4m3fnにして省メモリ化します。
+
+`--attn-mode`には使用するattentionの実装を指定します。`sageattn`、`flash`（Flash Attention 2が必要）が指定できます。
+
+`--output-type`には`video`、`latent`、`both`が指定できます。
+
+`--blocks-to-swap`はCPUへoffloading（Block Swap）するブロック数を指定します。最大38です。`--use-cpu-offload`は指定しないでください。
+
+`--img-in-txt-in-offloading`を指定すると`img_in`と`txt_in`をCPUにオフロードします。
+
+VRAMが24GBより少ない場合、`--vae-chunk-size 16`のように`--vae-chunk-size`オプションを指定してVAEの省メモリ化を行うことができます。元からある`--vae-tiling`オプションの利用も検討してください。
+
+保存したlatentのデコードのみを行う`--latent-path`オプションもあります。
+
+他のオプションは`sample_video.py`と同じです。
+
+24GB VRAMの場合、`--block-to-swap 38`指定時、1280x720では109フレームが限界のようです。
+
+以下はオリジナルのREADMEです。
+
+---- 
+
 <!-- ## **HunyuanVideo** -->
 
 [中文阅读](./README_zh.md)

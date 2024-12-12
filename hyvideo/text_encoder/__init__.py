@@ -29,12 +29,14 @@ def load_text_encoder(
             f"Loading text encoder model ({text_encoder_type}) from: {text_encoder_path}"
         )
 
+    # reduce peak memory usage by specifying the dtype of the model
+    dtype = PRECISION_TO_TYPE[text_encoder_precision] if text_encoder_precision else None
     if text_encoder_type == "clipL":
-        text_encoder = CLIPTextModel.from_pretrained(text_encoder_path)
+        text_encoder = CLIPTextModel.from_pretrained(text_encoder_path, torch_dtype=dtype)
         text_encoder.final_layer_norm = text_encoder.text_model.final_layer_norm
     elif text_encoder_type == "llm":
         text_encoder = AutoModel.from_pretrained(
-            text_encoder_path, low_cpu_mem_usage=True
+            text_encoder_path, low_cpu_mem_usage=True, torch_dtype=dtype
         )
         text_encoder.final_layer_norm = text_encoder.norm
     else:

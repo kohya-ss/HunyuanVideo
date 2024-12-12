@@ -55,7 +55,9 @@ class RMSNorm(nn.Module):
         """
         output = self._norm(x.float()).type_as(x)
         if hasattr(self, "weight"):
-            output = output * self.weight
+            # output = output * self.weight
+            # support fp8
+            output = output * self.weight.to(output.dtype)
         return output
 
 

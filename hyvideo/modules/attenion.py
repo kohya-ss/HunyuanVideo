@@ -14,9 +14,21 @@ except ImportError:
     flash_attn_varlen_func = None
     _flash_attn_forward = None
 
+try:
+    print(f"Trying to import sageattention")
+    from sageattention import sageattn_varlen
+    
+    print("Using sageattention")
+except ImportError:
+    print(f"Failed to import flash_attn and sageattention")
+    sageattn_varlen = None
 
 MEMORY_LAYOUT = {
     "flash": (
+        lambda x: x.view(x.shape[0] * x.shape[1], *x.shape[2:]),
+        lambda x: x,
+    ),
+    "sageattn": (
         lambda x: x.view(x.shape[0] * x.shape[1], *x.shape[2:]),
         lambda x: x,
     ),
@@ -106,6 +118,20 @@ def attention(
         )
     elif mode == "flash":
         x = flash_attn_varlen_func(
+            q,
+            k,
+            v,
+            cu_seqlens_q,
+            cu_seqlens_kv,
+            max_seqlen_q,
+            max_seqlen_kv,
+        )
+        # x with shape [(bxs), a, d]
+        x = x.view(
+            batch_size, max_seqlen_q, x.shape[-2], x.shape[-1]
+        )  # reshape x to [b, s, a, d]
+    elif mode == "sageattn":
+        x = sageattn_varlen(
             q,
             k,
             v,
