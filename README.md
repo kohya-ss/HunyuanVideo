@@ -1,5 +1,9 @@
 <!-- ## **HunyuanVideo** -->
 
+The feature addition is done in the [feature/memory-opt-inference](https://github.com/kohya-ss/HunyuanVideo/tree/feature/memory-opt-inference) branch.
+
+機能追加は [feature/memory-opt-inference](https://github.com/kohya-ss/HunyuanVideo/tree/feature/memory-opt-inference)ブランチで行っています。
+
 [中文阅读](./README_zh.md)
 
 <p align="center">
