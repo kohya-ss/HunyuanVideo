@@ -243,6 +243,7 @@ class MMDoubleStreamBlock(nn.Module):
         # attention computation end
 
         img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1] :]
+        attn = None
 
         # Calculate the img bloks.
         img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
@@ -360,6 +361,9 @@ class MMSingleStreamBlock(nn.Module):
         qkv, mlp = torch.split(
             self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1
         )
+        x_mod = None
+        # mlp = mlp.to("cpu", non_blocking=True)
+        # clean_memory_on_device(x.device)
 
         q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
         qkv = None
@@ -417,7 +421,13 @@ class MMSingleStreamBlock(nn.Module):
         # attention computation end
 
         # Compute activation in mlp stream, cat again and run second linear layer.
-        output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
+        # mlp = mlp.to(x.device)
+        mlp = self.mlp_act(mlp)
+        attn_mlp = torch.cat((attn, mlp), 2)
+        attn = None
+        mlp = None
+        output = self.linear2(attn_mlp)
+        attn_mlp = None
         return x + apply_gate(output, gate=mod_gate)
 
 
@@ -794,6 +804,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     self.offloader_single.submit_move_blocks(self.single_blocks, block_idx)
 
         img = x[:, :img_seq_len, ...]
+        x = None
 
         # ---------------------------- Final layer ------------------------------
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)

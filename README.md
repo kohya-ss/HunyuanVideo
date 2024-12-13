@@ -6,14 +6,46 @@ This code is for video generation on GPUs with equal to or less than 24GB VRAM u
 
 ## Environment Setup
 
-Create a new venv and install the latest PyTorch and TorchVision (verified to work with 2.5.1).
+CUDA 12.x is required. Create a new venv and activate it. Install the latest PyTorch and TorchVision (confirmed to work with 2.5.1).
+
+```shell
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+```
 
 Install the required packages using `requirements_opt.txt` (torchvision, pandas, gradio, etc. are commented out).
 
-Install SageAttention according to [this](https://www.reddit.com/r/StableDiffusion/comments/1h7hunp/how_to_run_hunyuanvideo_on_a_single_24gb_vram_card/?rdt=36679). (You may need to update the Microsoft Visual C++ redistributable package.)
+```shell
+pip install -r requirements_opt.txt
+```
 
-I cannot answer questions about environment setup.
+Install SageAttention according to [this Reddit post](https://www.reddit.com/r/StableDiffusion/comments/1h7hunp/how_to_run_hunyuanvideo_on_a_single_24gb_vram_card/?rdt=36679). Visual C++ redistributable packages may need to be updated.
 
+For reference, the following are brief instructions for installing SageAttention.
+
+1. Download the wheel of triton 3.1.0 according to your Python version from [here](https://github.com/woct0rdho/triton-windows/releases/tag/v3.1.0-windows.post5). Install it.
+
+2. Install Microsoft Visual Studio 2022 or Build Tools for Visual Studio 2022 with C++ build support (refer to the Reddit post above).
+
+3. Clone the SageAttention repository to any folder.
+
+    ```shell
+    git clone https://github.com/thu-ml/SageAttention.git
+    ```
+
+4. Open `SageAttention\csrc\math.cuh` and change `ushort` to `unsigned short` on lines 71 and 146.
+
+5. Open the `x64 Native Tools Command Prompt for VS 2022` in Visual Studio 2022 from the Start menu.
+
+6. Activate the venv and navigate to the SageAttention folder, then run the following command. If you get an error about DISTUTILS, run `set DISTUTILS_USE_SDK=1` and try again.
+
+    ```shell
+    python setup.py install
+    ```
+
+The installation of SageAttention is now complete.
+
+※ I cannot answer questions about environment setup.
+  
 ## Download the Model
 
 Download the model according to the official README and place it in any directory as follows:
@@ -69,11 +101,41 @@ Block Swapを使用して、24GB以下のVRAMのGPUで動画生成を行うた�
 
 ## 環境整備
 
-新しくvenvを作成します。最新のPyTorchとTorchVisionをインストールします（2.5.1で動作確認済み）。
+CUDA 12.xが必要です。新しくvenvを作成し、有効にします。最新のPyTorchとTorchVisionをインストールします（2.5.1で動作確認済み）。
+
+```shell
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+```
 
 `requirements_opt.txt`を使用して、必要なパッケージをインストールします（torchvisionとpandas、gradio等をコメントアウトしています）。
 
+```shell
+pip install -r requirements_opt.txt
+```
+
 [こちら](https://www.reddit.com/r/StableDiffusion/comments/1h7hunp/how_to_run_hunyuanvideo_on_a_single_24gb_vram_card/?rdt=36679)を参考にSageAttentionをインストールします。（Microsoft Visual C++ 再頒布可能パッケージを最新にする必要があるかもしれません。）
+
+参考までに、以下は、SageAttentionインストールの簡単な手順です。
+
+1. Pythonのバージョンに応じたtriton 3.1.0のwhellを[こちら](https://github.com/woct0rdho/triton-windows/releases/tag/v3.1.0-windows.post5)からダウンロードしてインストールします。
+
+2. Microsoft Visual Studio 2022かBuild Tools for Visual Studio 2022を、C++のビルドができるよう設定し、インストールします。（上のRedditの投稿を参照してください）。
+
+3. 任意のフォルダにSageAttentionのリポジトリをクローンします。
+    ```shell
+    git clone https://github.com/thu-ml/SageAttention.git
+    ```
+
+4. `SageAttention\csrc`フォルダ内の`math.cuh`を開き、71行目と146行目の `ushort` を `unsigned short` に変更して保存します。
+
+5. スタートメニューから Visual Studio 2022 内の `x64 Native Tools Command Prompt for VS 2022` を選択してコマンドプロンプトを開きます。
+
+6. venvを有効にし、SageAttentionのフォルダに移動して以下のコマンドを実行します。DISTUTILSが設定されていない、のようなエラーが出た場合は `set DISTUTILS_USE_SDK=1`としてから再度実行してください。
+    ```shell
+    python setup.py install
+    ```
+
+以上でSageAttentionのインストールが完了です。
 
 ※環境整備に関する質問にはお答えできません。
 
