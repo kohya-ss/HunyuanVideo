@@ -522,6 +522,7 @@ def main():
         freqs_sin = freqs_sin.to(device=device, dtype=dit_dtype)
 
         num_warmup_steps = len(timesteps) - num_inference_steps * scheduler.order
+        # with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as p:
         with tqdm(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 latents = scheduler.scale_model_input(latents, t)
@@ -547,6 +548,9 @@ def main():
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % scheduler.order == 0):
                     if progress_bar is not None:
                         progress_bar.update()
+
+        # print(p.key_averages().table(sort_by="self_cpu_time_total", row_limit=-1))
+        # print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
         transformer = None
         clean_memory_on_device(device)

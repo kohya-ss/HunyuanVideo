@@ -70,9 +70,9 @@ def get_cu_seqlens(text_mask, img_len):
 
 
 def attention(
-    q,
-    k,
-    v,
+    q_or_qkv_list, 
+    k=None,
+    v=None,
     mode="flash",
     drop_rate=0,
     attn_mask=None,
@@ -105,6 +105,7 @@ def attention(
     Returns:
         torch.Tensor: Output tensor after self attention with shape [b, s, ad]
     """
+    q, k, v = q_or_qkv_list if type(q_or_qkv_list) == list else (q_or_qkv_list, k, v)
     pre_attn_layout, post_attn_layout = MEMORY_LAYOUT[mode]
     q = pre_attn_layout(q)
     k = pre_attn_layout(k)
@@ -116,6 +117,10 @@ def attention(
         x = F.scaled_dot_product_attention(
             q, k, v, attn_mask=attn_mask, dropout_p=drop_rate, is_causal=causal
         )
+        if type(q_or_qkv_list) == list:
+            q_or_qkv_list.clear()
+        del q, k, v
+        del attn_mask
     elif mode == "flash":
         x = flash_attn_varlen_func(
             q,
@@ -126,6 +131,9 @@ def attention(
             max_seqlen_q,
             max_seqlen_kv,
         )
+        if type(q_or_qkv_list) == list:
+            q_or_qkv_list.clear()
+        del q, k, v
         # x with shape [(bxs), a, d]
         x = x.view(
             batch_size, max_seqlen_q, x.shape[-2], x.shape[-1]
@@ -140,6 +148,9 @@ def attention(
             max_seqlen_q,
             max_seqlen_kv,
         )
+        if type(q_or_qkv_list) == list:
+            q_or_qkv_list.clear()
+        del q, k, v
         # x with shape [(bxs), a, d]
         x = x.view(
             batch_size, max_seqlen_q, x.shape[-2], x.shape[-1]

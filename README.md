@@ -2,7 +2,7 @@
 
 ## About
 
-This code is for video generation on GPUs with less than 24GB of VRAM using Block Swap.
+This code is for video generation on GPUs with equal to or less than 24GB VRAM using Block Swap.
 
 ## Environment Setup
 
@@ -39,7 +39,7 @@ python generate_video_optimized.py --model-base /path/to/ckpts --fp8
 --blocks-to-swap 20 --img-in-txt-in-offloading
 ```
 
-For 24GB VRAM, with `--block-to-swap 38` specified, 1280x720 seems to be the limit at 109 frames.
+For 24GB VRAM, with `--block-to-swap 38`, you can generate 1280x720, 129-frame videos.
 
 Specify the directory of the downloaded model with `--model-base` (by keeping the directory structure above, you don't need to specify `--dit-weight`).
 
@@ -53,7 +53,7 @@ Specify the output type with `--output-type`. You can specify `video`, `latent`,
 
 Specify `--img-in-txt-in-offloading` to offload `img_in` and `txt_in` to the CPU.
 
-If your VRAM is less than 24GB, you can use the `--vae-chunk-size` option to reduce the memory usage of the VAE, like `--vae-chunk-size 16`. Consider using the existing `--vae-tiling` option.
+If you have less than 24GB VRAM, consider using the `--vae-chunk-size` option to reduce the memory usage of the VAE like `--vae-chunk-size 16`. Consider using the existing `--vae-tiling` option. With 16GB, you can generate 960x544, 129-frame videos or 1280x720, 81-frame videos.
 
 `--latent-path` option is also available to decode saved latents only.
 
@@ -102,7 +102,7 @@ python generate_video_optimized.py --model-base /path/to/ckpts --fp8
 --blocks-to-swap 20 --img-in-txt-in-offloading
 ```
 
-24GB VRAMの場合、`--block-to-swap 38`指定時、1280x720では109フレームが限界のようです。
+24GB VRAMの場合、`--block-to-swap 38`を指定することで、1280x720が129フレーム生成できるようです。
 
 `--model-base`にはダウンロードしたモデルのディレクトリを指定します（上のディレクトリ構成にしておくことで`--dit-weight`の指定は不要）。
 
@@ -116,7 +116,7 @@ python generate_video_optimized.py --model-base /path/to/ckpts --fp8
 
 `--img-in-txt-in-offloading`を指定すると`img_in`と`txt_in`をCPUにオフロードします。
 
-VRAMが24GBより少ない場合、`--vae-chunk-size 16`のように`--vae-chunk-size`オプションを指定してVAEの省メモリ化を行うことができます。元からある`--vae-tiling`オプションの利用も検討してください。
+VRAMが24GBより少ない場合、`--vae-chunk-size 16`のように`--vae-chunk-size`オプションを指定してVAEの省メモリ化を行ってください。元からある`--vae-tiling`オプションの利用も検討してください。16GBでは、960x544で129フレームが、1280x720で81フレームが生成できるようです
 
 保存したlatentのデコードのみを行う`--latent-path`オプションもあります。
 
