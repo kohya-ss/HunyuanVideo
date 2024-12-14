@@ -11,9 +11,8 @@ import torch
 from loguru import logger
 import accelerate
 from diffusers.utils.torch_utils import randn_tensor
+from transformers.models.llama import LlamaModel
 from tqdm import tqdm
-
-from hyvideo.modules.models import HYVideoDiffusionTransformer
 
 
 # dirty hack to correctly work `model_base` argument
@@ -32,6 +31,7 @@ from hyvideo.text_encoder import TextEncoder
 from hyvideo.vae import load_vae
 from hyvideo.modules import load_model
 from hyvideo.modules.posemb_layers import get_nd_rotary_pos_embed
+from hyvideo.modules.models import HYVideoDiffusionTransformer
 from hyvideo.diffusion.schedulers import FlowMatchDiscreteScheduler
 from hyvideo.utils.file_utils import save_videos_grid
 
@@ -48,10 +48,16 @@ def parse_args():
     # add arguments for this script
     parser.add_argument("--fp8", action="store_true", help="use fp8 for DiT model, --precision is still used")
     parser.add_argument(
+        "--fp8-llm", action="store_true", help="use fp8 for Text Encoder 1 (LLM), --text-encoder-precision is still used"
+    )
+    parser.add_argument(
         "--device", type=str, default=None, help="device to use for inference. If None, use CUDA if available, otherwise use CPU"
     )
     parser.add_argument("--attn-mode", type=str, default="flash", help="attention mode for transformer")
     parser.add_argument("--vae-chunk-size", type=int, default=None, help="chunk size for CausalConv3d in VAE")
+    parser.add_argument(
+        "--vae-spatial-tile-sample-min-size", type=int, default=None, help="spatial tile sample min size for VAE, default 256"
+    )
     parser.add_argument("--blocks-to-swap", type=int, default=None, help="number of blocks to swap in the model")
     parser.add_argument("--img-in-txt-in-offloading", action="store_true", help="offload img_in and txt_in to cpu")
     parser.add_argument("--output-type", type=str, default="video", help="output type: video, latent or both")
@@ -163,7 +169,7 @@ def encode_prompt(prompt: Union[str, list[str]], device: torch.device, num_video
     return prompt_embeds, attention_mask
 
 
-def encode_input_prompt(prompt, args, device):
+def encode_input_prompt(prompt, args, device, fp8_llm=False, accelerator=None):
     if args.prompt_template_video is not None:
         crop_start = PROMPT_TEMPLATE[args.prompt_template_video].get("crop_start", 0)
     elif args.prompt_template is not None:
@@ -191,9 +197,35 @@ def encode_input_prompt(prompt, args, device):
         apply_final_norm=args.apply_final_norm,
         reproduce=args.reproduce,
         logger=logger,
-        device=device,  # if not args.use_cpu_offload else "cpu",
+        device=device if not fp8_llm else "cpu",
     )
     text_encoder.eval()
+    if fp8_llm:
+        org_dtype = text_encoder.dtype
+        logger.info(f"Moving and casting text encoder to {device} and torch.float8_e4m3fn")
+        text_encoder.to(device=device, dtype=torch.float8_e4m3fn)
+
+        # prepare LLM for fp8
+        def prepare_fp8(llama_model: LlamaModel, target_dtype):
+            def forward_hook(module):
+                def forward(hidden_states):
+                    input_dtype = hidden_states.dtype
+                    hidden_states = hidden_states.to(torch.float32)
+                    variance = hidden_states.pow(2).mean(-1, keepdim=True)
+                    hidden_states = hidden_states * torch.rsqrt(variance + module.variance_epsilon)
+                    return module.weight.to(input_dtype) * hidden_states.to(input_dtype)
+
+                return forward
+
+            for module in llama_model.modules():
+                if module.__class__.__name__ in ["Embedding"]:
+                    # print("set", module.__class__.__name__, "to", target_dtype)
+                    module.to(target_dtype)
+                if module.__class__.__name__ in ["LlamaRMSNorm"]:
+                    # print("set", module.__class__.__name__, "hooks")
+                    module.forward = forward_hook(module)
+
+        prepare_fp8(text_encoder.model, org_dtype)
 
     logger.info(f"loading text encoder 2: {args.text_encoder_2}")
     text_encoder_2 = TextEncoder(
@@ -209,7 +241,11 @@ def encode_input_prompt(prompt, args, device):
 
     # encode prompt
     logger.info(f"Encoding prompt with text encoder 1")
-    prompt_embeds, prompt_mask = encode_prompt(prompt, device, args.num_videos, text_encoder)
+    if fp8_llm:
+        with accelerator.autocast():
+            prompt_embeds, prompt_mask = encode_prompt(prompt, device, args.num_videos, text_encoder)
+    else:
+        prompt_embeds, prompt_mask = encode_prompt(prompt, device, args.num_videos, text_encoder)
     logger.info(f"Encoding prompt with text encoder 2")
     prompt_embeds_2, prompt_mask_2 = encode_prompt(prompt, device, args.num_videos, text_encoder_2)
 
@@ -370,6 +406,7 @@ def get_rotary_pos_embed(args, model, video_length, height, width):
 
 def decode_latents(args, latents, device):
     vae, _, s_ratio, t_ratio = load_vae(args.vae, args.vae_precision, logger=logger, device=device)
+    vae.eval()
     # vae_kwargs = {"s_ratio": s_ratio, "t_ratio": t_ratio}
 
     # set chunk_size to CausalConv3d recursively
@@ -397,13 +434,15 @@ def decode_latents(args, latents, device):
     else:
         latents = latents / vae.config.scaling_factor
 
+    latents = latents.to(device=device, dtype=vae.dtype)
+    if args.vae_spatial_tile_sample_min_size is not None:
+        vae.enable_spatial_tiling(True)
+        vae.tile_sample_min_size = args.vae_spatial_tile_sample_min_size
+        vae.tile_latent_min_size = args.vae_spatial_tile_sample_min_size // 8
+    elif args.vae_tiling:
+        vae.enable_spatial_tiling(True)
     with torch.no_grad():
-        latents = latents.to(device=device, dtype=vae.dtype)
-        if args.vae_tiling:
-            vae.enable_tiling()
-            image = vae.decode(latents, return_dict=False)[0]
-        else:
-            image = vae.decode(latents, return_dict=False)[0]
+        image = vae.decode(latents, return_dict=False)[0]
 
     if expand_temporal_dim or image.shape[2] == 1:
         image = image.squeeze(2)
@@ -443,7 +482,9 @@ def main():
 
         # encode prompt with LLM and Text Encoder
         logger.info(f"Encoding prompt: {prompt}")
-        prompt_embeds, prompt_mask, prompt_embeds_2, prompt_mask_2 = encode_input_prompt(prompt, args, device)
+        prompt_embeds, prompt_mask, prompt_embeds_2, prompt_mask_2 = encode_input_prompt(
+            prompt, args, device, args.fp8_llm, accelerator
+        )
 
         # load DiT model
         blocks_to_swap = args.blocks_to_swap if args.blocks_to_swap else 0
@@ -552,6 +593,7 @@ def main():
         # print(p.key_averages().table(sort_by="self_cpu_time_total", row_limit=-1))
         # print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
+        latents = latents.detach().cpu()
         transformer = None
         clean_memory_on_device(device)
 

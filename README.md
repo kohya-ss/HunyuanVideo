@@ -85,7 +85,9 @@ Specify the output type with `--output-type`. You can specify `video`, `latent`,
 
 Specify `--img-in-txt-in-offloading` to offload `img_in` and `txt_in` to the CPU.
 
-If you have less than 24GB VRAM, consider using the `--vae-chunk-size` option to reduce the memory usage of the VAE like `--vae-chunk-size 16`. Consider using the existing `--vae-tiling` option. With 16GB, you can generate 960x544, 129-frame videos or 1280x720, 81-frame videos.
+If you have less than 24GB VRAM, consider using the `--vae-chunk-size` option to reduce the memory usage of the VAE like `--vae-chunk-size 16`.~~Consider using the existing `--vae-tiling` option.~~ `--vae-tiling` is enabled by default. With 16GB, you can generate 960x544, 129-frame videos or 1280x720, 81-frame videos.
+
+For 12GB, there is a VRAM usage peak in LLM text encoding and VAE. Specify `--fp8-llm` to convert the LLM weights to float8_e4m3fn. In addition to `--vae-chunk-size 16`, specify `--vae-spatial-tile-sample-min-size 128` to tile more finely. Specify `--output-type` as `both` to save the latent as well, in case of an Out of Memory error with VAE. With 12GB, you can generate 960x544, 129-frame videos or 1280x720, 73-frame videos.
 
 `--latent-path` option is also available to decode saved latents only.
 
@@ -178,7 +180,9 @@ python generate_video_optimized.py --model-base /path/to/ckpts --fp8
 
 `--img-in-txt-in-offloading`を指定すると`img_in`と`txt_in`をCPUにオフロードします。
 
-VRAMが24GBより少ない場合、`--vae-chunk-size 16`のように`--vae-chunk-size`オプションを指定してVAEの省メモリ化を行ってください。元からある`--vae-tiling`オプションの利用も検討してください。16GBでは、960x544で129フレームが、1280x720で81フレームが生成できるようです
+VRAMが24GBより少ない場合、`--vae-chunk-size 16`のように`--vae-chunk-size`オプションを指定してVAEの省メモリ化を行ってください。~~元からある`--vae-tiling`オプションの利用も検討してください。~~ `--vae-tiling`はデフォルトで有効化されています。16GBでは、960x544で129フレームが、1280x720で81フレームが生成できるようです
+
+12GBの場合、LLMでのテキストエンコードとVAEにVRAM使用量のピークがあります。`--fp8-llm`を指定してLLMの重みをfloat8_e4m3fnにしてください。また`--vae-chunk-size 16`に加えて`--vae-spatial-tile-sample-min-size 128`を指定してタイリングを細かくしてください。`--output-type`に`both`を指定してlatentも保存し、VAEでOut of Memoryエラーが出た場合に備えることをお勧めします。960x544で129フレームが、1280x720で73フレームが生成できるようです。
 
 保存したlatentのデコードのみを行う`--latent-path`オプションもあります。
 
