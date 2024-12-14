@@ -73,6 +73,8 @@ python generate_video_optimized.py --model-base /path/to/ckpts --fp8
 
 For 24GB VRAM, with `--block-to-swap 38`, you can generate 1280x720, 129-frame videos.
 
+NOTE: `--infer-steps` does not affect VRAM usage, so first generate with a short step like `--infer-steps 2` to check the VRAM usage.
+
 Specify the directory of the downloaded model with `--model-base` (by keeping the directory structure above, you don't need to specify `--dit-weight`).
 
 Specify `--fp8` to reduce the memory usage by converting the DiT weights to float8_e4m3fn.
@@ -167,6 +169,8 @@ python generate_video_optimized.py --model-base /path/to/ckpts --fp8
 ```
 
 24GB VRAMの場合、`--block-to-swap 38`を指定することで、1280x720が129フレーム生成できるようです。
+
+※`--infer-steps`はVRAM使用量に影響しないため、最初に `--infer-steps 2` のように短いステップで生成し、VRAM使用量を確認してください。
 
 `--model-base`にはダウンロードしたモデルのディレクトリを指定します（上のディレクトリ構成にしておくことで`--dit-weight`の指定は不要）。
 
